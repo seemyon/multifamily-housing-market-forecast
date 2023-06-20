@@ -1,0 +1,274 @@
+---
+title: "MSA indexforecast"
+output: html_document
+date: "2023-05-26"
+---
+
+```{r}
+library(tidyverse)
+library(tsibble)
+library(lubridate)
+library(fable)
+library(dplyr)
+library(zoo)
+library(fpp3)
+```
+
+```{r}
+#setwd('')
+df <- read_csv('df0.csv',show_col_types = FALSE)
+df$Date <- yq(df$Date)
+df$Date <- yearquarter(as.yearqtr(df$Date,format = "%Y-%m-%d"))
+
+df<- df %>% rename('geo' = 'Geography Name', 'cbsa' = 'CBSA Code',
+                    'income' = 'Median Household Income', 'cap'= 'Market Cap Rate',
+                    'pop' = 'Population', 'national' = 'National index',
+                   'households' = 'Households','total_emp' = 'Total Employment',
+                   'industrial_emp' = 'Industrial Employment', 'office_emp' = 'Office Employment',
+                   'rent_burden' = 'Rent Burden', 'msa_index' = 'Market Sale Price Index')
+df <- subset(df, select = c(Date, geo, cbsa, pop, households, income,  
+                            total_emp, industrial_emp, office_emp, cap, national,
+                            Emp_house_perc, Ind_perc, rent_burden, Office_perc,
+                            Emp_perc, msa_index))
+```
+
+
+```{r}
+# Create a new table with stacked values
+# df <- df %>% pivot_longer(cols = c(income, rent, pop, households, 
+                         # total_emp, industrial_emp, office_emp), 
+                         # names_to = "variable", values_to = "measure")
+
+# Print the new table
+# print(df)
+```
+
+```{r}
+df <- as_tsibble(df, index=Date, key = c(geo, cbsa))
+```
+
+```{r}
+# divide data set into train (2021) and test (2022)
+train <- df %>% 
+  filter(year(Date) < 2023)
+
+test <- df %>% 
+  filter(year(Date) > 2022)
+```
+
+
+```{r}
+texas_tr <- df %>%
+  filter(
+    geo == "Abilene - TX",
+    year(Date) < 2022
+  )
+
+texas_test <- df %>%
+    filter(
+    geo == "Abilene - TX",
+    year(Date) == 2022
+  )
+```
+
+```{r}
+texas_tr %>% autoplot(msa_index)
+```
+
+
+```{r}
+fit_tex <- texas_tr %>%
+  model(arima = ARIMA(msa_index ~ pop + households +income + total_emp + industrial_emp + office_emp +
+                    cap + national + Emp_house_perc + Ind_perc + rent_burden + Office_perc + Emp_perc))
+report(fit_tex)
+
+fit_tex %>% gg_tsresiduals()
+```
+```{r}
+aug <- augment(fit_tex)
+```
+
+```{r}
+forec_texas <- forecast(fit_tex, new_data = texas_test)
+
+forec_texas %>%
+  autoplot(texas_test, level = NULL) +
+  ggtitle("Forecasts for 2022 Abilene - TX") + 
+  xlab("Date") +
+  guides(colour = guide_legend(title = "Forecast"))
+
+```
+```{r}
+ggplot()+
+  geom_line(data=aug,aes(x=Date,y=msa_index),col='red',alpha=0.6)+
+  geom_line(data=aug,aes(x=Date,y=.fitted),col='blue',alpha=0.6)+
+  ggtitle("Fitted vs Actual MSA index for Abilene - TX")
+```
+
+```{r}
+accuracy(forec_texas, texas_test)
+```
+
+Forecast for all MSAs
+```{r}
+fit <- train %>%
+  model(arima = ARIMA(msa_index ~ pop + households +income + total_emp + industrial_emp + office_emp +
+                    cap + national + Emp_house_perc + Ind_perc + rent_burden + Office_perc + Emp_perc))
+fit
+```
+
+```{r}
+fc <- fit %>%
+  forecast(test)
+fc
+```
+
+```{r}
+fc %>%
+  filter(geo %in% c("Albuquerque - NM", "Chambersburg-Waynesboro - PA")) %>%
+  autoplot(train, level = NULL) +
+  xlab("Year") + ylab("MSA index")
+```
+
+```{r}
+df1 <- as.data.frame(fc)
+df <- as.data.frame(df)
+```
+
+```{r}
+
+df1 <- df1 %>% select(Date, geo, cbsa, .mean) %>% rename('msa_index' = '.mean')
+colnames(df1)
+colnames(df)
+```
+```{r}
+df0 <- merge(df, df1, by = c("Date", "geo", "cbsa"))
+```
+
+Define MSAs without forecast and reduce the number of variables
+```{r}
+geo_list <- unique(df1$geo[is.na(df1$msa_index)])
+```
+
+```{r}
+df_missed = df[df$geo %in% geo_list,]
+```
+
+```{r}
+df_missed <- as_tsibble(df_missed, index=Date, key = c(geo, cbsa))
+```
+
+```{r}
+# divide data set into train (2021) and test (2022)
+train_missed <- df_missed %>% 
+  filter(year(Date) < 2023)
+
+test_missed <- df_missed %>% 
+  filter(year(Date) > 2022)
+```
+
+```{r}
+akron <- train_missed %>%
+  filter(
+    geo == "Akron - OH"
+  )
+
+akron_test <- train_missed %>%
+    filter(
+    geo == "Akron - OH",
+    year(Date) == 2022
+  )
+
+akron_tr <- train_missed %>%
+  filter(
+    geo == "Akron - OH",
+    year(Date) < 2022
+  )
+
+akron_test <- train_missed %>%
+    filter(
+    geo == "Akron - OH",
+    year(Date) == 2022
+  )
+```
+
+```{r}
+akron_tr %>% autoplot(msa_index)
+```
+
+
+```{r}
+fit_akron <- akron_tr %>%
+  model(arima = ARIMA(msa_index ~ national + households + cap + rent_burden + income))
+report(fit_akron)
+
+fit_akron %>% gg_tsresiduals()
+```
+
+```{r}
+forec_akron <- forecast(fit_akron, akron_test)
+
+forec_akron %>%
+  autoplot(akron, level = NULL) +
+  ggtitle("Forecasts for Tx ") +
+  xlab("Year") +
+  guides(colour = guide_legend(title = "Forecast"))
+```
+
+Forecast for the rest MSAs
+
+```{r}
+fit_missed <- train_missed %>%
+  model(arima = ARIMA(msa_index ~ national + households + cap + rent_burden + income))
+fit_missed
+```
+```{r}
+fc_missed <- fit_missed %>%
+  forecast(test_missed)
+fc_missed
+```
+
+```{r}
+fc_missed %>%
+  filter(geo %in% c("Akron - OH","Anchorage - AK","Bakersfield - CA",
+                    "Baton Rouge - LA")) %>%
+  autoplot(train, level = NULL) +
+  xlab("Year") + ylab("Values")
+```
+
+
+```{r}
+df1_missed <- as.data.frame(fc_missed)
+df <- as.data.frame(df)
+```
+
+```{r}
+
+df1_missed <- df1_missed %>% select(Date, geo, cbsa, .mean) %>% rename('msa_index' = '.mean')
+colnames(df1_missed)
+colnames(df1)
+```
+
+```{r}
+df2 <- merge(df1, df1_missed, by = c("Date", "geo", "cbsa"), all.x = TRUE)
+```
+
+```{r}
+df2$msa_index <- coalesce(df2$msa_index.x, df2$msa_index.y)
+df2$msa_index.x <- NULL
+df2$msa_index.y <- NULL
+```
+
+```{r}
+df0 <- merge(df, df2, by = c("Date", "geo", "cbsa"), all.x = TRUE)
+```
+
+```{r}
+df0$msa_index <- coalesce(df0$msa_index.x, df0$msa_index.y)
+df0$msa_index.x <- NULL
+df0$msa_index.y <- NULL
+```
+
+```{r}
+#write.csv(df0, "{csv filew path}", row.names=FALSE)
+```

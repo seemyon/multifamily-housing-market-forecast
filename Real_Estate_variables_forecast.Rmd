@@ -1,0 +1,88 @@
+---
+title: "MSA index growth forecast"
+output: html_document
+date: "2023-05-26"
+---
+
+```{r}
+library(tidyverse)
+library(tsibble)
+library(lubridate)
+library(fable)
+library(dplyr)
+library(zoo)
+```
+
+```{r}
+#setwd('')
+df <- read_csv('MSA_index.csv',show_col_types = FALSE)
+df$Date <- mdy(df$Date)
+df$Date <- yearquarter(as.yearqtr(df$Date,format = "%Y-%m-%d"))
+df<- df %>% rename('geo' = 'Geography Name', 'income' = 'Median Household Income', 
+                   'rent' = 'Market Effective Rent/Unit','pop' = 'Population',
+                   'households' = 'Households','total_emp' = 'Total Employment',
+                   'industrial_emp' = 'Industrial Employment', 'office_emp' = 'Office Employment')
+df <- subset(df, select = c(Date, geo, income, rent, pop, households, 
+                            total_emp, industrial_emp, office_emp))
+```
+
+```{r}
+# Create a new table with stacked values
+df <- df %>% pivot_longer(cols = c(income, rent, pop, households, 
+                          total_emp, industrial_emp, office_emp), 
+                          names_to = "variable", values_to = "measure")
+
+# Print the new table
+print(df)
+```
+
+```{r}
+df <- as_tsibble(df, index=Date, key = c(geo, variable))
+```
+
+Generate auto ARIMA model for every MSA
+```{r}
+fit <- df %>%
+  model(arima = ARIMA(measure)
+  )
+fit
+```
+
+```{r}
+fc <- fit %>%
+  forecast(h = "5 years")
+fc
+```
+
+```{r}
+fc %>%
+  filter(geo == "Albany - GA") %>%
+  autoplot(df, level = NULL) +
+  xlab("Year") + ylab("Values")
+```
+
+```{r}
+df1 <- as.data.frame(fc)
+df <- as.data.frame(df)
+```
+
+```{r}
+df1 <- df1 %>% select(Date, geo, variable, .mean) %>% rename('measure' = '.mean')
+colnames(df1)
+colnames(df)
+```
+
+```{r}
+df0 <- rbind(df,df1)
+```
+
+```{r}
+df_final <- df0 %>%
+  pivot_wider(names_from = variable, values_from = measure)
+print(df_final)
+```
+
+```{r}
+# write.csv(df_final, "{csv file path}", row.names=FALSE)
+```
+

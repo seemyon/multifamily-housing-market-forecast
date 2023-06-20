@@ -1,0 +1,83 @@
+---
+title: "National average multi-family index forecast"
+output: html_document
+date: "2023-06-18"
+---
+
+```{r}
+library(fpp3)
+library(tidyverse)
+library(lubridate)
+library(dplyr)
+library(ggcorrplot)
+library(psych)
+library(tsibble)
+library(zoo)
+```
+
+```{r}
+#setwd('/')
+df <- read_csv('national average mf index.csv',show_col_types = FALSE)
+df$Date <- mdy(df$Date)
+df$Date <- yearquarter(as.yearqtr(df$Date,format = "%Y-%m-%d"))
+```
+
+```{r}
+dfts <- ts(df$Index, frequency = 4, start = 2013)
+dftts <- as_tsibble(dfts)
+names(dftts)[2] <- "NI"
+```
+
+```{r}
+gg_tsdisplay(dftts, y = NI, plot_type='partial')
+```
+
+
+```{r}
+fit_n <- dftts %>% model(auto = ARIMA(NI),
+                       arima = ARIMA(NI ~ pdq(4,1,0) + PDQ(1,0,0)))
+fit_n
+
+report(fit_n)
+
+fit <- dftts %>%
+  model(arima = ARIMA(NI ~ pdq(4,1,0) + PDQ(1,0,0)))
+fit
+```
+```{r}
+fit %>% gg_tsresiduals()
+```
+
+```{r}
+fc <- fit %>%
+  forecast(h = "5 years")
+fc
+```
+
+
+```{r}
+fc %>%
+  autoplot(dftts, level = NULL) +
+  ggtitle("Forecasts for National Avg. Index") +
+  xlab("Year") +
+  guides(colour = guide_legend(title = "Forecast"))
+```
+
+```{r}
+df1 <- as.data.frame(fc)
+df <- as.data.frame(df)
+```
+
+```{r}
+df1 <- df1 %>% select(index, .mean) %>% rename('Date' = 'index','Index'='.mean')
+colnames(df1)
+colnames(df)
+```
+
+```{r}
+df0 <- rbind(df,df1)
+```
+
+```{r}
+# write.csv(df0, "{unique file path}", row.names=FALSE)
+```
